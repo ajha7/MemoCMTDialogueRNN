@@ -165,5 +165,6 @@ class Config(BaseConfig):
         # Search for linear layer output dimension
         self.linear_layer_output: List = [128]
         self.linear_layer_last_dim: int = 64
+        self.ablate_audio: bool = False
         for key, value in kwargs.items():
             setattr(self, key, value)

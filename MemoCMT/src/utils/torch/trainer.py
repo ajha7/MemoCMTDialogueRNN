@@ -80,7 +80,18 @@ class TorchTrainer(ABC, nn.Module):
                     e_val.append(value)
                     epoch_log.update({key: e_val})
                     postfix += f"{key}: {value:.4f} "
-                    mlflow.log_metric(f"train_{key}", value, step=step)
+
+                log_every = getattr(getattr(self, "cfg", None), "log_every_n_steps", None)
+                should_log = (not log_every) or (log_every <= 1) or (step % log_every == 0)
+                try:
+                    if should_log:
+                        mlflow.log_metric(
+                            "learning_rate",
+                            self.optimizer.param_groups[0]["lr"],
+                            step=step,
+                        )
+                except:
+                    pass
                 pbar.set_description(postfix)
                 pbar.update(1)
 
@@ -361,17 +372,73 @@ class TorchTrainer(ABC, nn.Module):
             uri=f'file://{os.path.abspath(os.path.join(self.log_dir, "mlruns"))}'
         )
         global_step = self.global_step
+        
         # Start training
         with mlflow.start_run():
+            fast_cfg = getattr(self, "cfg", None)
+            fast_first = bool(getattr(fast_cfg, "fast_first_epoch", False))
+            skip_first_eval = bool(getattr(fast_cfg, "skip_first_epoch_eval", True))
+            if not hasattr(self, "_fast_applied"):
+                self._fast_applied = False
+            if not hasattr(self, "_fast_backup"):
+                self._fast_backup = None
+
             for epoch in range(self.start_epoch, epochs + 1):
                 logger.info(f"Epoch {epoch}/{epochs}")
+                # Apply fast-first-epoch settings
+                if fast_first and epoch == self.start_epoch and not self._fast_applied:
+                    self._fast_backup = {
+                        "use_gradient_checkpointing": getattr(fast_cfg, "use_gradient_checkpointing", False),
+                        "text_unfreeze": getattr(fast_cfg, "text_unfreeze", False),
+                        "freeze_feature_extractor": getattr(fast_cfg, "freeze_feature_extractor", True),
+                        "memo_chunk_size": getattr(fast_cfg, "memo_chunk_size", 16),
+                    }
+                    setattr(fast_cfg, "use_gradient_checkpointing", False)
+                    setattr(fast_cfg, "text_unfreeze", False)
+                    setattr(fast_cfg, "freeze_feature_extractor", True)
+                    setattr(fast_cfg, "memo_chunk_size", max(64, self._fast_backup["memo_chunk_size"]))
+
+                    # Freeze encoders on the live network (handles MemoCMT and MemoCMTDialogueRNN)
+                    try:
+                        net = self.network
+                        base = getattr(net, "memo", net)
+                        if hasattr(base, "text_encoder"):
+                            for p in base.text_encoder.parameters():
+                                p.requires_grad = False
+                            base.text_encoder.eval()
+                        if hasattr(base, "audio_encoder"):
+                            for p in base.audio_encoder.parameters():
+                                p.requires_grad = False
+                            base.audio_encoder.eval()
+                    except Exception:
+                        pass
+
+                    self._fast_applied = True
+
+                # Restore after first epoch (at the start of the next epoch)
+                if fast_first and epoch == self.start_epoch + 1 and self._fast_applied and self._fast_backup is not None:
+                    for k, v in self._fast_backup.items():
+                        setattr(fast_cfg, k, v)
+                    try:
+                        net = self.network
+                        base = getattr(net, "memo", net)
+                        # Restore requires_grad according to cfg flags
+                        if hasattr(base, "text_encoder"):
+                            tu = bool(getattr(fast_cfg, "text_unfreeze", False))
+                            for p in base.text_encoder.parameters():
+                                p.requires_grad = tu
+                            base.text_encoder.train(tu)
+                        if hasattr(base, "audio_encoder"):
+                            au = bool(getattr(fast_cfg, "audio_unfreeze", False))
+                            for p in base.audio_encoder.parameters():
+                                p.requires_grad = au
+                            base.audio_encoder.train(au)
+                    except Exception:
+                        pass
+                    self._fast_applied = False
+                effective_eval = None if (skip_first_eval and epoch == self.start_epoch) else eval_data
                 global_step = self.train_epoch(
-                    global_step,
-                    epoch,
-                    train_data,
-                    eval_data,
-                    logger,
-                    callbacks=callbacks,
+                    global_step, epoch, train_data, effective_eval, logger, callbacks=callbacks,
                 )
                 self.lr_scheduler(global_step, epoch)
                 if test_data is not None:
