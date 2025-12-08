@@ -35,6 +35,7 @@ class BaseDataset(Dataset):
             encoder_model (_4M_SER, optional): if want to pre-encoder dataset
         """
         super(BaseDataset, self).__init__()
+        self.cfg = cfg
 
         with open(os.path.join(cfg.data_root, data_mode), "rb") as train_file:
             self.data_list = pickle.load(train_file)
@@ -119,8 +120,10 @@ class BaseDataset(Dataset):
             samples = samples[: self.audio_max_length]
 
         samples = torchaudio.functional.resample(samples, sr, 16000)
-
-        return torch.from_numpy(samples.astype(np.float32))
+        tensor = torch.from_numpy(samples.astype(np.float32))
+        if getattr(self, "cfg", None) is not None and getattr(self.cfg, "ablate_audio", False):
+            tensor = torch.zeros_like(tensor)
+        return tensor
 
     def _text_preprocessing(self, text):
         """

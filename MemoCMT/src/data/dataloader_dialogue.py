@@ -39,6 +39,7 @@ def _parse_meta(path: str) -> Tuple[str, int, int]:
 class ConversationDataset(Dataset):
     def __init__(self, cfg: Config, data_mode: str):
         super().__init__()
+        self.cfg = cfg
         with open(os.path.join(cfg.data_root, data_mode), "rb") as f:
             flat = pickle.load(f)
 
@@ -74,7 +75,10 @@ class ConversationDataset(Dataset):
         elif self.audio_max_length is not None:
             samples = samples[: self.audio_max_length]
         samples = torchaudio.functional.resample(samples, sr, 16000)
-        return torch.from_numpy(samples.astype(np.float32))
+        tensor = torch.from_numpy(samples.astype(np.float32))
+        if getattr(self, "cfg", None) is not None and getattr(self.cfg, "ablate_audio", False):
+            tensor = torch.zeros_like(tensor)
+        return tensor
 
     def _ptext(self, text: str) -> torch.Tensor:
         text = _text_preprocessing(text)

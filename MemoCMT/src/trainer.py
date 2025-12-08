@@ -81,6 +81,8 @@ class Trainer(TorchTrainer):
         input_audio = input_audio.to(self.device, non_blocking=True)
         label = label.to(self.device, non_blocking=True)
         input_text = input_text.to(self.device, non_blocking=True)
+        if getattr(self.cfg, "ablate_audio", False):
+            input_audio = torch.zeros_like(input_audio)
         
         use_amp = getattr(self.cfg, "use_amp", False) and self.device.type == "cuda"
         try:
@@ -148,6 +150,8 @@ class Trainer(TorchTrainer):
         input_audio = input_audio.to(self.device, non_blocking=True)
         label = label.to(self.device, non_blocking=True)
         input_text = input_text.to(self.device, non_blocking=True)
+        if getattr(self.cfg, "ablate_audio", False):
+            input_audio = torch.zeros_like(input_audio)
         
         with torch.no_grad():
             use_amp = getattr(self.cfg, "use_amp", False) and self.device.type == "cuda"
@@ -191,6 +195,8 @@ class DialogueTrainer(TorchTrainer):
         lengths = lengths.to(self.device, non_blocking=True)
         labels = labels.to(self.device, non_blocking=True)
         mask = mask.to(self.device, non_blocking=True)
+        if getattr(self.cfg, "ablate_audio", False):
+            input_audio = torch.zeros_like(input_audio)
 
         def compute():
             logits, _ = self.network(input_text, input_audio, speakers, lengths)  # (B,T,C)

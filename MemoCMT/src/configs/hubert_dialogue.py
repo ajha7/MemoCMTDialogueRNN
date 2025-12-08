@@ -28,6 +28,7 @@ class Config(BaseConfig):
         self.num_epochs = 25
         self.learning_rate_gamma = 0.1
         self.learning_rate_step_size = 30
+        self.ablate_audio = True
 
         self.fast_first_epoch = True
         self.skip_first_epoch_eval = True
