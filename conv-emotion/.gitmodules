@@ -1,0 +1,9 @@
+[submodule "generalized-dialogue-context-modeling"]
+	path = generalized-dialogue-context-modeling
+	url = https://github.com/declare-lab/dialogue-understanding
+[submodule "RECCON-dataset"]
+	path = RECCON-dataset
+	url = https://github.com/declare-lab/RECCON
+[submodule "M2H2-dataset"]
+	path = M2H2-dataset
+	url = https://github.com/declare-lab/M2H2-dataset
