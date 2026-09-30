@@ -1,4 +1,4 @@
-# MemoCMT + DialogueRNN
+# MoReCMT: Multimodal Recurrent Cross-Modal Transformer-Based Feature Fusion for Emotional Recognition
 
 MemoCMT classifies emotion one utterance at a time. Audio goes through HuBERT, the transcript goes
 through BERT, a cross-modal transformer fuses the two, and a head predicts the label. It works, but
@@ -11,8 +11,7 @@ are fed in order through a DialogueRNN cell that carries three things: a global 
 a per-speaker state, and an emotion state. The classifier reads the emotion state.
 
 Results come from `scripts/run_experiments.py`: test metrics on IEMOCAP Session 5 (4-class), mean ±
-std over 3 seeds, written to `experiments/summary.md`. The older numbers in the Drive folder (81.51%
-best) are pre-fix runs and aren't comparable. See [Checkpoints and logs](#checkpoints-and-logs).
+std over 3 seeds, written to `experiments/summary.md`.
 
 ## What's in here
 
@@ -76,7 +75,7 @@ Use a GPU runtime. The config assumes CUDA is there, and on CPU you will be wait
 
 ### Skip the ESD and MELD cells
 
-They don't work. They call `train.py -ds ESD -name ESD_train`, but `train.py` only takes `-cfg`, so
+They are not required and were not used in the experiments. They call `train.py -ds ESD -name ESD_train`, but `train.py` only takes `-cfg`, so
 those two flags aren't recognized. Everything dataset-related lives in the config file now. If you
 want ESD or MELD, preprocess them and point `data_name` / `data_root` at the result.
 
@@ -124,9 +123,6 @@ Drive paths and you'll want to change it.
 All the training runs, checkpoints, and logs:
 
 https://drive.google.com/drive/folders/1vD4Sw9k2AlWMRuzVvYMP9Pr7fXMLRvr3?usp=drive_link
-
-**All of these are pre-fix runs: random utterance split, validation accuracy averaged per
-conversation, and the old context cell.** Don't compare them to numbers from the current code.
 
 - `20251207-1457`: context window 6, 81.51%.
 - `20251207-191239`: 81.49%.
