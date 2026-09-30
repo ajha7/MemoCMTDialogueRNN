@@ -5,6 +5,7 @@ import logging
 import os
 import pickle
 import random
+import sys
 
 import pandas as pd
 import soundfile as sf
@@ -13,6 +14,10 @@ import numpy as np
 import torch
 from moviepy.editor import VideoFileClip
 from sklearn.model_selection import train_test_split
+
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from data.conversations import utterance_id
+from data.iemocap_split import split_by_session
 
 
 SEED = 0
@@ -63,6 +68,7 @@ def preprocess_IEMOCAP(args):
     session_id = list(range(1, 6))
 
     samples = []
+    meta = {}
     labels = []
     iemocap2label = LABEL_MAP
     iemocap2label.update({"exc": 1})
@@ -120,17 +126,17 @@ def preprocess_IEMOCAP(args):
                                         print(text_query)
                                         raise Exception
                             samples.append((wav_path, text, emo))
+                            uid = data[3]
+                            meta[uid] = {
+                                "session": sess_id,
+                                "dialog": uid.rsplit("_", 1)[0],
+                                "speaker": uid.rsplit("_", 1)[1][0],
+                                "start": float(data[0]),
+                            }
                             labels.append(emo)
 
-    # Shuffle and split
-    temp = list(zip(samples, labels))
-    random.Random(args.seed).shuffle(temp)
-    samples, labels = zip(*temp)
-    train, test_samples, train_labels, _ = train_test_split(
-        samples, labels, test_size=0.1, random_state=args.seed
-    )
-    train_samples, val_samples, _, _ = train_test_split(
-        train, train_labels, test_size=0.1, random_state=args.seed
+    train_samples, val_samples, test_samples = split_by_session(
+        samples, meta, test_session=args.test_session, val_frac=args.val_frac, seed=0
     )
     # Save data
     os.makedirs(args.dataset + "_preprocessed", exist_ok=True)
@@ -140,6 +146,24 @@ def preprocess_IEMOCAP(args):
         pickle.dump(val_samples, f)
     with open(os.path.join(args.dataset + "_preprocessed", "test.pkl"), "wb") as f:
         pickle.dump(test_samples, f)
+
+    out_dir = args.dataset + "_preprocessed"
+    with open(os.path.join(out_dir, "meta.pkl"), "wb") as f:
+        pickle.dump(meta, f)
+
+    def _info(split):
+        return {
+            "utterances": len(split),
+            "dialogues": len({meta[utterance_id(s[0])]["dialog"] for s in split}),
+            "class_counts": {str(c): sum(1 for s in split if s[2] == c) for c in range(4)},
+        }
+
+    with open(os.path.join(out_dir, "split_info.json"), "w") as f:
+        json.dump(
+            {"test_session": args.test_session, "val_frac": args.val_frac,
+             "train": _info(train_samples), "val": _info(val_samples), "test": _info(test_samples)},
+            f, indent=2,
+        )
 
     logging.info(f"Train samples: {len(train_samples)}")
     logging.info(f"Val samples: {len(val_samples)}")
@@ -325,6 +349,8 @@ def arg_parser():
         default=0,
         help="Ignore samples with length < ignore_length",
     )
+    parser.add_argument("--test_session", type=int, default=5, help="IEMOCAP session held out as test")
+    parser.add_argument("--val_frac", type=float, default=0.1, help="fraction of non-test dialogues used for val")
 
     return parser.parse_args()
 
