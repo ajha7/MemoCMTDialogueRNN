@@ -1,5 +1,7 @@
+import pytest
+
 from data.conversations import utterance_id
-from data.iemocap_split import split_by_session
+from data.iemocap_split import check_val_split, split_by_session
 
 
 def _fake(num_sessions=5, dialogs_per_session=10, turns=4):
@@ -46,3 +48,13 @@ def test_split_is_a_partition_and_deterministic():
     b = split_by_session(samples, meta, seed=0)
     assert a == b
     assert sorted(a[0] + a[1] + a[2]) == sorted(samples)
+
+
+@pytest.mark.parametrize("data_valid", [None, "test.pkl", "/data/IEMOCAP/test.pkl"])
+def test_validation_can_never_be_the_test_set(data_valid):
+    with pytest.raises(ValueError, match="test set"):
+        check_val_split(data_valid)
+
+
+def test_val_split_passes_through():
+    assert check_val_split("val.pkl") == "val.pkl"

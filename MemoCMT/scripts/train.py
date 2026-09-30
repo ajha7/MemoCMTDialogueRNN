@@ -17,7 +17,7 @@ import trainer as Trainer
 from configs.base import Config
 from data.dataloader import build_train_test_dataset
 from models import losses, networks, optims
-from utils.configs import get_options, parse_overrides
+from utils.configs import apply_overrides, check_selection_config, get_options, parse_overrides
 from utils.torch.callbacks import CheckpointsCallback
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,6 +32,8 @@ def set_seed(seed: int):
 
 def main(cfg: Config):
     set_seed(getattr(cfg, "seed", 0))
+    if getattr(cfg, "conversation_aware", False):
+        check_selection_config(cfg)
     logging.info("Initializing model...")
     # Model
     try:
@@ -132,6 +134,7 @@ def main(cfg: Config):
             "context_window": getattr(cfg, "context_window", None),
             "ablate_audio": getattr(cfg, "ablate_audio", False),
             "ablate_text": getattr(cfg, "ablate_text", False),
+            "data_valid": cfg.data_valid,
             "best_val": ckpt_callback.best_val,
             "test": test,
         }
@@ -152,8 +155,7 @@ def arg_parser():
 if __name__ == "__main__":
     args = arg_parser()
     cfg: Config = get_options(args.config)
-    for key, value in parse_overrides(args.set).items():
-        setattr(cfg, key, value)
+    apply_overrides(cfg, parse_overrides(args.set))
     if cfg.resume and cfg.cfg_path is not None:
         resume = cfg.resume
         resume_path = cfg.resume_path

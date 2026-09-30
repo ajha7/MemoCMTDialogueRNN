@@ -1,7 +1,17 @@
+import os
 import random
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from data.conversations import utterance_id
+
+
+def check_val_split(data_valid: Optional[str]) -> str:
+    """Checkpoint selection reads this split, so it must never be the test set."""
+    if data_valid is None or os.path.basename(data_valid) == "test.pkl":
+        raise ValueError(
+            f"data_valid={data_valid!r} would select the checkpoint on the test set; use 'val.pkl'."
+        )
+    return data_valid
 
 
 def split_by_session(

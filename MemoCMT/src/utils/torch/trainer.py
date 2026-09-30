@@ -14,6 +14,7 @@ from torchsummary import summary
 from ..metrics import aggregate_eval_outputs
 from . import optimizers
 from .callbacks import Callback
+from .freeze import freeze_encoders, restore_encoders
 
 logging.basicConfig(
     level=logging.INFO,
@@ -388,19 +389,7 @@ class TorchTrainer(ABC, nn.Module):
                     setattr(fast_cfg, "memo_chunk_size", max(64, self._fast_backup["memo_chunk_size"]))
 
                     # Freeze encoders on the live network (handles MemoCMT and MemoCMTDialogueRNN)
-                    try:
-                        net = self.network
-                        base = getattr(net, "memo", net)
-                        if hasattr(base, "text_encoder"):
-                            for p in base.text_encoder.parameters():
-                                p.requires_grad = False
-                            base.text_encoder.eval()
-                        if hasattr(base, "audio_encoder"):
-                            for p in base.audio_encoder.parameters():
-                                p.requires_grad = False
-                            base.audio_encoder.eval()
-                    except Exception:
-                        pass
+                    self._fast_requires_grad = freeze_encoders(self.network)
 
                     self._fast_applied = True
 
@@ -408,22 +397,9 @@ class TorchTrainer(ABC, nn.Module):
                 if fast_first and epoch == self.start_epoch + 1 and self._fast_applied and self._fast_backup is not None:
                     for k, v in self._fast_backup.items():
                         setattr(fast_cfg, k, v)
-                    try:
-                        net = self.network
-                        base = getattr(net, "memo", net)
-                        # Restore requires_grad according to cfg flags
-                        if hasattr(base, "text_encoder"):
-                            tu = bool(getattr(fast_cfg, "text_unfreeze", False))
-                            for p in base.text_encoder.parameters():
-                                p.requires_grad = tu
-                            base.text_encoder.train(tu)
-                        if hasattr(base, "audio_encoder"):
-                            au = bool(getattr(fast_cfg, "audio_unfreeze", False))
-                            for p in base.audio_encoder.parameters():
-                                p.requires_grad = au
-                            base.audio_encoder.train(au)
-                    except Exception:
-                        pass
+                    # Restore exactly the trainable set the optimizer was built with. Unfreezing
+                    # more (e.g. all of BERT) leaves gradients the optimizer never zeroes or steps.
+                    restore_encoders(self.network, self._fast_requires_grad)
                     self._fast_applied = False
                 effective_eval = None if (skip_first_eval and epoch == self.start_epoch) else eval_data
                 global_step = self.train_epoch(

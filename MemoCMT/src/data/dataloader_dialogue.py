@@ -9,6 +9,7 @@ import torchaudio
 
 from configs.base import Config
 from data.conversations import group_conversations, load_meta
+from data.iemocap_split import check_val_split
 
 def _text_preprocessing(text: str) -> str:
     text = re.sub("[\\(\\[].*?[\\)\\]]", "", str(text))
@@ -114,7 +115,7 @@ def collate_conversations(batch: List[Dict]):
 
 def build_conversation_train_test_dataset(cfg: Config):
     train_data = ConversationDataset(cfg, "train.pkl")
-    valid_set = cfg.data_valid if cfg.data_valid is not None else "test.pkl"
+    valid_set = check_val_split(cfg.data_valid)
     test_data = ConversationDataset(cfg, valid_set)
 
     train_loader = DataLoader(

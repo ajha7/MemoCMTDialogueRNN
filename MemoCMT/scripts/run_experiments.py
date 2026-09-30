@@ -31,6 +31,43 @@ def build_command(exp: str, seed: int, results_path: str) -> List[str]:
     return [sys.executable, "train.py", "-cfg", CONFIG, "--set"] + [f"{k}={v}" for k, v in overrides.items()]
 
 
+def matches(result: dict, exp: str, seed: int) -> bool:
+    """True if a results.json was produced by this experiment's settings and seed."""
+    expected = {"ablate_audio": False, "ablate_text": False, **EXPERIMENTS[exp], "seed": seed}
+    return all(result.get(key) == value for key, value in expected.items())
+
+
+def _parse_name(name: str):
+    exp, _, seed = name[: -len(".json")].rpartition("_seed")
+    return exp, int(seed) if seed.isdigit() else None
+
+
+def is_done(path: str, exp: str, seed: int) -> bool:
+    if not os.path.exists(path):
+        return False
+    with open(path) as f:
+        return matches(json.load(f), exp, seed)
+
+
+def load_results(runs_dir: str) -> List[dict]:
+    """Read <exp>_seed<k>.json files, skipping anything whose contents don't match its name."""
+    results = []
+    for name in sorted(os.listdir(runs_dir)):
+        if not name.endswith(".json"):
+            continue
+        exp, seed = _parse_name(name)
+        if exp not in EXPERIMENTS or seed is None:
+            print(f"ignoring {name}: not <experiment>_seed<k>.json")
+            continue
+        with open(os.path.join(runs_dir, name)) as f:
+            result = json.load(f)
+        if not matches(result, exp, seed):
+            print(f"ignoring {name}: its settings don't match {exp} seed {seed}")
+            continue
+        results.append({"experiment": exp, **result})
+    return results
+
+
 def summarize(results: List[dict]) -> List[dict]:
     rows = []
     for exp in dict.fromkeys(r["experiment"] for r in results):
@@ -70,18 +107,17 @@ def main():
     for exp in args.only:
         for seed in args.seeds:
             path = os.path.join(runs_dir, f"{exp}_seed{seed}.json")
-            if os.path.exists(path):
+            if is_done(path, exp, seed):
                 print(f"skip {exp} seed {seed} (done)")
                 continue
+            if os.path.exists(path):
+                print(f"rerunning {exp} seed {seed}: {path} has other settings")
             cmd = build_command(exp, seed, path)
             print(" ".join(cmd))
             if not args.dry_run:
                 subprocess.run(cmd, check=True)
 
-    results = []
-    for name in sorted(os.listdir(runs_dir)):
-        with open(os.path.join(runs_dir, name)) as f:
-            results.append({"experiment": name.rsplit("_seed", 1)[0], **json.load(f)})
+    results = load_results(runs_dir)
     if results:
         write_summary(summarize(results))
 

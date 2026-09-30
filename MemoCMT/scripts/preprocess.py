@@ -12,7 +12,6 @@ import soundfile as sf
 import tqdm
 import numpy as np
 import torch
-from moviepy.editor import VideoFileClip
 from sklearn.model_selection import train_test_split
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -51,6 +50,8 @@ def export_mp4_to_audio(
         wav_file (str): Path to wav output file
         verbose (bool, optional): Whether to print ffmpeg output. Defaults to False.
     """
+    from moviepy.editor import VideoFileClip
+
     try:
         video = VideoFileClip(mp4_file)
     except:
@@ -233,6 +234,9 @@ def preprocess_ESD(args):
 
 
 def preprocess_MELD(args):
+    # Only MELD needs moviepy, and moviepy>=2 removed moviepy.editor, so keep it out of IEMOCAP's path.
+    from moviepy.editor import VideoFileClip
+
     meld2label = {
         "anger": "ang",
         "joy": "hap",
