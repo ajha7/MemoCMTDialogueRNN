@@ -13,6 +13,8 @@ a per-speaker state, and an emotion state. The classifier reads the emotion stat
 Results come from `scripts/run_experiments.py`: test metrics on IEMOCAP Session 5 (4-class), mean ±
 std over 3 seeds, written to `experiments/summary.md`.
 
+[View Paper PDF](MoReCMT-Multimodal%20Recurrent%20Cross-Modal%20Transformer-Based%20Feature%20Fusion%20for%20Emotional%20Recognition.pdf)
+
 ## What's in here
 
 | Path | What it is |
