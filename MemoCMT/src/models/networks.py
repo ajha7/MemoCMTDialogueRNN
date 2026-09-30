@@ -5,6 +5,7 @@ import contextlib
 from configs.base import Config
 from torch.utils.checkpoint import checkpoint
 
+from .dialogue_rnn import DialogueRNNCell, EmotionClassifier
 from .modules import build_audio_encoder, build_text_encoder
 
 
@@ -361,44 +362,6 @@ class AudioOnly(nn.Module):
 
         return out, cls_token_final_fusion_norm
 
-class DialogueRNNCell(nn.Module):
-    def __init__(self, feat_dim: int, hidden_dim: int, num_speakers: int = 2, window: int = 10):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_speakers = num_speakers
-        self.window = window
-        self.g_gru = nn.GRUCell(feat_dim + hidden_dim, hidden_dim)
-        self.p_gru = nn.GRUCell(feat_dim, hidden_dim)
-        self.e_gru = nn.GRUCell(feat_dim + hidden_dim, hidden_dim)
-
-    def _attend(self, hist, q, device):
-        if len(hist) == 0:
-            return torch.zeros(self.hidden_dim, device=device)
-        H = torch.stack(hist[-self.window:])  # (w, H)
-        w = torch.softmax(H @ q, dim=0)       # (w,)
-        return (w.unsqueeze(1) * H).sum(0)
-
-    def forward(self, u_seq: torch.Tensor, speakers: torch.Tensor, lengths: torch.Tensor):
-        B, T, D = u_seq.shape
-        H = self.hidden_dim
-        e_seq = torch.zeros(B, T, H, device=u_seq.device)
-        for b in range(B):
-            g = torch.zeros(H, device=u_seq.device)
-            e = torch.zeros(H, device=u_seq.device)
-            party = [torch.zeros(H, device=u_seq.device) for _ in range(self.num_speakers)]
-            g_hist = []
-            T_b = int(lengths[b].item())
-            for t in range(T_b):
-                u_t = u_seq[b, t]
-                s_t = int(speakers[b, t].item()) if speakers is not None else 0
-                c_t = self._attend(g_hist, g, u_seq.device)
-                g = self.g_gru(torch.cat([u_t, c_t], -1), g)
-                party[s_t] = self.p_gru(u_t, party[s_t])
-                e = self.e_gru(torch.cat([u_t, c_t], -1), e)
-                g_hist.append(g)
-                e_seq[b, t] = e
-        return e_seq
-
 class MemoCMTDialogueRNN(nn.Module):
     def __init__(self, cfg: Config, device: str = "cpu"):
         super().__init__()
@@ -425,13 +388,11 @@ class MemoCMTDialogueRNN(nn.Module):
             feat_dim=feat_dim_ctx,
             hidden_dim=cfg.dialogue_hidden_size,
             num_speakers=getattr(cfg, "num_speakers", 2),
-            window=getattr(cfg, "context_window", 8),
+            window=getattr(cfg, "context_window", None),
         )
 
-        self.dropout = nn.Dropout(cfg.dropout)
-        self.classifier = nn.Linear(cfg.dialogue_hidden_size, cfg.num_classes)
-        nn.init.xavier_uniform_(self.classifier.weight)
-        nn.init.zeros_(self.classifier.bias)
+        # Keep the name `classifier`: optims._build_param_groups gives it the dialogue LR.
+        self.classifier = EmotionClassifier(cfg.dialogue_hidden_size, cfg.num_classes, dropout=cfg.dropout)
 
     def forward(
         self,
@@ -479,7 +440,7 @@ class MemoCMTDialogueRNN(nn.Module):
 
         # Run context RNN and classifier in FP32 for stability
         e_seq = self.ctx(fused, speakers, lengths)          # (B, T, H)
-        logits = self.classifier(self.dropout(e_seq))       # (B, T, C)
+        logits = self.classifier(e_seq)                     # (B, T, C)
         return logits, e_seq
 
 __all__ = ['MemoCMT', 'TextOnly', 'AudioOnly', 'MemoCMTDialogueRNN']

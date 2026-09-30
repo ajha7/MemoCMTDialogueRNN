@@ -10,7 +10,8 @@ class Config(BaseConfig):
         self.num_speakers = 2
         self.fusion_head_output_type = "cls"
         self.dialogue_hidden_size = 128
-        self.context_window = 3
+        # Strict: turn t is predicted from turns t-w+1..t only. 1 = no context, None = whole dialogue.
+        self.context_window = 6
         self.freeze_feature_extractor = False
         self.text_unfreeze = True
         self.audio_unfreeze = False
