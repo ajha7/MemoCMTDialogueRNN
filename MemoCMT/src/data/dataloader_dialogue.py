@@ -138,3 +138,13 @@ def build_conversation_train_test_dataset(cfg: Config):
         collate_fn=collate_conversations,
     )
     return (train_loader, test_loader)
+
+
+def build_conversation_eval_loader(cfg: Config, split: str) -> DataLoader:
+    return DataLoader(
+        ConversationDataset(cfg, split),
+        batch_size=1,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        collate_fn=collate_conversations,
+    )

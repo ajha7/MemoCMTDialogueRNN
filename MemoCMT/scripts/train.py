@@ -17,18 +17,21 @@ import trainer as Trainer
 from configs.base import Config
 from data.dataloader import build_train_test_dataset
 from models import losses, networks, optims
-from utils.configs import get_options
+from utils.configs import get_options, parse_overrides
 from utils.torch.callbacks import CheckpointsCallback
 
-SEED = 0
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
 def main(cfg: Config):
+    set_seed(getattr(cfg, "seed", 0))
     logging.info("Initializing model...")
     # Model
     try:
@@ -106,6 +109,7 @@ def main(cfg: Config):
         max_to_keep=cfg.max_to_keep,
         save_best_val=cfg.save_best_val,
         save_all_states=cfg.save_all_states,
+        monitor=[getattr(cfg, "best_metric", "ua")],
     )
 
     if cfg.resume:
@@ -114,16 +118,42 @@ def main(cfg: Config):
     trainer.compile(optimizer=optimizer, scheduler=lr_scheduler)
     trainer.fit(train_ds, cfg.num_epochs, test_ds, callbacks=[ckpt_callback])
 
+    if getattr(cfg, "conversation_aware", False):
+        import json
+        from data.dataloader_dialogue import build_conversation_eval_loader
+
+        best_metric = getattr(cfg, "best_metric", "ua")
+        best_path = os.path.join(weight_dir, f"best_{best_metric}", "checkpoint_0.pth")
+        trainer.network.load_state_dict(torch.load(best_path, map_location=device))
+        test = trainer.run_eval(build_conversation_eval_loader(cfg, "test.pkl"))
+        results = {
+            "name": cfg.name,
+            "seed": getattr(cfg, "seed", 0),
+            "context_window": getattr(cfg, "context_window", None),
+            "ablate_audio": getattr(cfg, "ablate_audio", False),
+            "ablate_text": getattr(cfg, "ablate_text", False),
+            "best_val": ckpt_callback.best_val,
+            "test": test,
+        }
+        logging.info(f"TEST ({best_metric}-selected): " + json.dumps({k: v for k, v in test.items() if isinstance(v, float)}))
+        for path in filter(None, [os.path.join(checkpoint_dir, "results.json"), getattr(cfg, "results_path", None)]):
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(results, f, indent=2)
+
 
 def arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("-cfg", "--config", type=str, default="../src/configs/base.py")
+    parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = arg_parser()
     cfg: Config = get_options(args.config)
+    for key, value in parse_overrides(args.set).items():
+        setattr(cfg, key, value)
     if cfg.resume and cfg.cfg_path is not None:
         resume = cfg.resume
         resume_path = cfg.resume_path

@@ -29,7 +29,10 @@ class Config(BaseConfig):
         self.num_epochs = 25
         self.learning_rate_gamma = 0.1
         self.learning_rate_step_size = 30
-        self.ablate_audio = True
+        self.ablate_audio = False
+        self.ablate_text = False
+        self.seed = 0
+        self.results_path = None
         self.best_metric = "ua"
 
         self.fast_first_epoch = True
