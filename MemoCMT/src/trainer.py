@@ -9,6 +9,17 @@ from configs.base import Config
 from models.networks import MemoCMT
 from utils.torch.trainer import TorchTrainer
 
+BERT_CLS, BERT_SEP, BERT_PAD = 101, 102, 0  # bert-base-uncased
+
+
+def _blank_text(ids: Tensor) -> Tensor:
+    """Replace every transcript with just [CLS][SEP] so BERT gets no lexical content."""
+    blank = torch.full_like(ids, BERT_PAD)
+    blank[..., 0] = BERT_CLS
+    blank[..., 1] = BERT_SEP
+    return blank
+
+
 class Trainer(TorchTrainer):
     def __init__(
         self,
@@ -89,8 +100,8 @@ class Trainer(TorchTrainer):
             if use_amp:
                 with torch.amp.autocast('cuda', dtype=torch.float16):
                     output = self.network(input_text, input_audio)
-                    loss = self.criterion(output, label)
-                    
+                    loss = self.criterion(output[0], label)
+
                 # Check for NaN before scaling
                 if not torch.isfinite(loss):
                     raise RuntimeError(f"Loss is {loss.item()}")
@@ -109,8 +120,8 @@ class Trainer(TorchTrainer):
                 self.scaler.update()
             else:
                 output = self.network(input_text, input_audio)
-                loss = self.criterion(output, label)
-                
+                loss = self.criterion(output[0], label)
+
                 if not torch.isfinite(loss):
                     raise RuntimeError(f"Loss is {loss.item()}")
                     
@@ -158,16 +169,18 @@ class Trainer(TorchTrainer):
             if use_amp:
                 with torch.amp.autocast('cuda', dtype=torch.float16):
                     output = self.network(input_text, input_audio)
-                    loss = self.criterion(output, label)
+                    loss = self.criterion(output[0], label)
             else:
                 output = self.network(input_text, input_audio)
-                loss = self.criterion(output, label)
+                loss = self.criterion(output[0], label)
             # Calculate accuracy
             _, preds = torch.max(output[0], 1)
             accuracy = torch.mean((preds == label).float())
         return {
             "loss": loss.detach().cpu().item(),
             "acc": accuracy.detach().cpu().item(),
+            "preds": preds.cpu().numpy(),
+            "labels": label.cpu().numpy(),
         }
 
 class DialogueTrainer(TorchTrainer):
@@ -197,6 +210,8 @@ class DialogueTrainer(TorchTrainer):
         mask = mask.to(self.device, non_blocking=True)
         if getattr(self.cfg, "ablate_audio", False):
             input_audio = torch.zeros_like(input_audio)
+        if getattr(self.cfg, "ablate_text", False):
+            input_text = _blank_text(input_text)
 
         def compute():
             logits, _ = self.network(input_text, input_audio, speakers, lengths)  # (B,T,C)
@@ -209,8 +224,7 @@ class DialogueTrainer(TorchTrainer):
             loss = self.criterion(logits_sel, labels_sel)
             with torch.no_grad():
                 preds = torch.argmax(logits_sel, dim=-1)
-                acc = (preds == labels_sel).float().mean()
-            return loss, acc
+            return loss, preds, labels_sel
 
         if train:
             self.network.train()
@@ -218,7 +232,7 @@ class DialogueTrainer(TorchTrainer):
             use_amp = getattr(self.cfg, "use_amp", False) and self.device.type == "cuda"
             if use_amp:
                 with torch.amp.autocast('cuda', dtype=torch.float16):
-                    loss, acc = compute()
+                    loss, preds, labels_sel = compute()
                     # Check for NaN
                     if not torch.isfinite(loss):
                         raise RuntimeError(f"Loss is {loss.item()}")
@@ -231,7 +245,7 @@ class DialogueTrainer(TorchTrainer):
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
-                loss, acc = compute()
+                loss, preds, labels_sel = compute()
                 if not torch.isfinite(loss):
                     raise RuntimeError(f"Loss is {loss.item()}")
                 loss.backward()
@@ -244,11 +258,15 @@ class DialogueTrainer(TorchTrainer):
             with torch.no_grad():
                 if use_amp:
                     with torch.amp.autocast('cuda', dtype=torch.float16):
-                        loss, acc = compute()
+                        loss, preds, labels_sel = compute()
                 else:
-                    loss, acc = compute()
+                    loss, preds, labels_sel = compute()
 
-        return {"loss": float(loss.detach().cpu()), "acc": float(acc.detach().cpu())}
+        out = {"loss": float(loss.detach().cpu()), "acc": float((preds == labels_sel).float().mean().cpu())}
+        if not train:
+            out["preds"] = preds.detach().cpu().numpy()
+            out["labels"] = labels_sel.detach().cpu().numpy()
+        return out
 
     def train_step(self, batch: Dict[str, Tensor]):
         return self._step(batch, train=True)

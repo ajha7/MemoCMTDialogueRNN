@@ -2,7 +2,7 @@ import logging
 import os
 import shutil
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, List, Optional
 
 
 class Callback(ABC):
@@ -42,6 +42,7 @@ class CheckpointsCallback(Callback):
         max_to_keep: int = 3,
         save_best_val: bool = False,
         save_all_states: bool = False,
+        monitor: Optional[List[str]] = None,
     ):
         """Callback to save checkpoints during training.
 
@@ -69,6 +70,7 @@ class CheckpointsCallback(Callback):
 
         self.save_all_states = save_all_states
         self.best_path = ""
+        self.monitor = monitor
 
     def __call__(
         self,
@@ -111,6 +113,8 @@ class CheckpointsCallback(Callback):
 
         elif isValPhase and self.save_best_val:
             for k, v in logs.items():
+                if self.monitor is not None and k not in self.monitor:
+                    continue
                 if k not in self.best_val:
                     logger.info(
                         "Model {} improve from inf to {}, Saving model...".format(k, v)

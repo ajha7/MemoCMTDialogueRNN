@@ -11,6 +11,7 @@ import tqdm
 from torch import nn
 from torchsummary import summary
 
+from ..metrics import aggregate_eval_outputs
 from . import optimizers
 from .callbacks import Callback
 
@@ -121,34 +122,22 @@ class TorchTrainer(ABC, nn.Module):
             mlflow.log_metric(f"train_epoch_{key}", np.mean(value), step=step)
 
         if eval_data is not None:
-            self.network.eval()
             logger.info("Performing validation...")
-            # First pass to retrieve keys
-            val_log = self.test_step(batch)
-            assert isinstance(val_log, dict), "val_step should return a dict."
-            eval_logs = {key: [] for key in val_log.keys()}
-
-            # Perform validation
-            for batch in tqdm.tqdm(eval_data, ascii=True):
-                val_log = self.test_step(batch)
-                for key, value in val_log.items():
-                    eval_logs[key].append(value)
-
-            # Log validation metrics
-            postfix = ""
-            for key, value in eval_logs.items():
-                postfix += f"{key}: {np.mean(value):.4f} "
-                mlflow.log_metric(f"val_{key}", np.mean(value), step=step)
-            logger.info("Validation: " + postfix)
-
-            # Callbacks
+            full = self.run_eval(eval_data)
+            eval_logs = {k: v for k, v in full.items() if isinstance(v, float)}
+            logger.info("Validation: " + " ".join(f"{k}: {v:.4f}" for k, v in eval_logs.items()))
+            for k, v in eval_logs.items():
+                mlflow.log_metric(f"val_{k}", v, step=step)
             if callbacks is not None:
-                eval_logs = {key: np.mean(value) for key, value in eval_logs.items()}
                 for callback in callbacks:
-                    callback(
-                        self, step, epoch, eval_logs, isValPhase=True, logger=logger
-                    )
+                    callback(self, step, epoch, eval_logs, isValPhase=True, logger=logger)
         return step
+
+    def run_eval(self, data: Iterable) -> Dict:
+        """Utterance-level metrics pooled over the whole split."""
+        self.network.eval()
+        outputs = [self.test_step(batch) for batch in tqdm.tqdm(data, ascii=True)]
+        return aggregate_eval_outputs(outputs, self.cfg.num_classes)
 
     def evaluate(
         self,
