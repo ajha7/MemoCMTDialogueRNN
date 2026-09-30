@@ -8,6 +8,7 @@ from transformers import BertTokenizer
 import torchaudio
 
 from configs.base import Config
+from data.conversations import group_conversations, load_meta
 
 def _text_preprocessing(text: str) -> str:
     text = re.sub("[\\(\\[].*?[\\)\\]]", "", str(text))
@@ -19,22 +20,6 @@ def _text_preprocessing(text: str) -> str:
     if not text.strip():
         text = "NULL"
     return text
-
-def _parse_meta(path: str) -> Tuple[str, int, int]:
-    name = os.path.splitext(os.path.basename(path))[0]
-    toks = name.split("_")
-    conv_id = "_".join(toks[:-1]) if len(toks) >= 2 else name
-    tail = toks[-1] if toks else name
-    m = re.search(r"([A-Za-z])(\d+)$", tail)
-    if m:
-        spk_char, idx = m.group(1).upper(), int(m.group(2))
-    else:
-        m2 = re.search(r"(\d+)$", name)
-        idx = int(m2.group(1)) if m2 else 0
-        ch = re.search(r"[FM]", name.upper())
-        spk_char = ch.group(0) if ch else "F"
-    spk = 0 if spk_char.upper() == "F" else 1
-    return conv_id, spk, idx
 
 class ConversationDataset(Dataset):
     def __init__(self, cfg: Config, data_mode: str):
@@ -48,15 +33,7 @@ class ConversationDataset(Dataset):
         self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         self.pad_id = self.tokenizer.pad_token_id
 
-        conv_map: Dict[str, List[Tuple]] = {}
-        for audio_path, text, label in flat:
-            conv_id, spk, idx = _parse_meta(audio_path)
-            conv_map.setdefault(conv_id, []).append((idx, spk, audio_path, text, int(label)))
-        # sort each conversation by idx
-        self.conversations: List[List[Tuple[int,int,str,str,int]]] = []
-        for conv_id in sorted(conv_map.keys()):
-            seq = sorted(conv_map[conv_id], key=lambda x: x[0])
-            self.conversations.append(seq)
+        self.conversations = group_conversations(flat, load_meta(cfg.data_root))
 
     def __len__(self):
         return len(self.conversations)
